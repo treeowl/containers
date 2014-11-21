@@ -78,6 +78,10 @@ import Data.Maybe
 import Data.Array
 import Data.List
 
+#if __GLASGOW_HASKELL__ >= 709
+import Data.Coerce
+#endif
+
 -------------------------------------------------------------------------
 --                                                                      -
 --      External interface
@@ -95,8 +99,23 @@ instance NFData a => NFData (SCC a) where
     rnf (CyclicSCC vs) = rnf vs
 
 instance Functor SCC where
-    fmap f (AcyclicSCC v) = AcyclicSCC (f v)
-    fmap f (CyclicSCC vs) = CyclicSCC (fmap f vs)
+    fmap = fmapSCC
+
+fmapSCC :: (a -> b) -> SCC a -> SCC b
+fmapSCC f (AcyclicSCC v) = AcyclicSCC (f v)
+fmapSCC f (CyclicSCC vs) = CyclicSCC (fmap f vs)
+#ifdef __GLASGOW_HASKELL__
+{-# NOINLINE [1] fmapSCC #-}
+{-# RULES
+"fmapSCC/fmapSCC" forall f g scc .
+   fmapSCC f (fmapSCC g scc) = fmapSCC (f . g) scc
+ #-}
+#endif
+#if __GLASGOW_HASKELL__ >= 709
+{-# RULES
+"fmapSCC/coerce" fmapSCC coerce = coerce
+ #-}
+#endif
 
 -- | The vertices of a list of strongly connected components.
 flattenSCCs :: [SCC a] -> [a]
