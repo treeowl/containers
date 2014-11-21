@@ -240,6 +240,22 @@ instance Applicative Seq where
       where add ys f = ys >< fmap f xs
     xs *> ys = replicateSeq (length xs) ys
 
+-- Stolen from the fmlist package by Sjoerd Visscher
+newtype FMList a = FM {unFM :: forall m . Monoid m => (a -> m) -> m}
+
+instance Foldable FMList where
+  foldMap f (FM g) = g f
+
+instance Applicative FMList where
+  pure x = FM ($ x)
+  gs <*> xs = transform (\f g -> unFM xs (f . g)) gs
+
+transform :: (forall m. Monoid m => (a -> m) -> (b -> m)) -> FMList b -> FMList a
+transform t (FM l) = FM (l . t)
+
+flatten :: Foldable t => FMList (t a) -> FMList a
+flatten = transform foldMap
+
 instance MonadPlus Seq where
     mzero = empty
     mplus = (><)
