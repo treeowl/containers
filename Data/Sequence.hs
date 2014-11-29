@@ -11,6 +11,7 @@
 #ifndef MIN_VERSION_base
 #define MIN_VERSION_base(major1,major2,minor) 0
 #endif
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Sequence
@@ -140,7 +141,7 @@ module Data.Sequence (
     node2,
     node3,
 #endif
-    ) where
+    )  where
 
 import Prelude hiding (
     Functor(..),
@@ -173,9 +174,6 @@ import Data.Functor.Identity (Identity(..))
 #endif
 
 
-infixr 5 `consTree`
-infixl 5 `snocTree`
-
 infixr 5 ><
 infixr 5 <|, :<
 infixl 5 |>, :>
@@ -184,7 +182,7 @@ class Sized a where
     size :: a -> Int
 
 -- | General-purpose finite sequences.
-newtype Seq a = Seq (FingerTree (Elem a))
+data Seq a = Seq {-# UNPACK #-} !Int (FingerTree (Elem a))
 
 instance Functor Seq where
     fmap = fmapSeq
@@ -193,7 +191,7 @@ instance Functor Seq where
 #endif
 
 fmapSeq :: (a -> b) -> Seq a -> Seq b
-fmapSeq f (Seq xs) = Seq (fmap (fmap f) xs)
+fmapSeq f (Seq n xs) = Seq n (fmap (fmap f) xs)
 #ifdef __GLASGOW_HASKELL__
 {-# NOINLINE [1] fmapSeq #-}
 {-# RULES
@@ -208,14 +206,14 @@ fmapSeq f (Seq xs) = Seq (fmap (fmap f) xs)
 #endif
 
 instance Foldable Seq where
-    foldMap f (Seq xs) = foldMap (foldMap f) xs
-    foldr f z (Seq xs) = foldr (flip (foldr f)) z xs
-    foldl f z (Seq xs) = foldl (foldl f) z xs
+    foldMap f (Seq _ xs) = foldMap (foldMap f) xs
+    foldr f z (Seq _ xs) = foldr (flip (foldr f)) z xs
+    foldl f z (Seq _ xs) = foldl (foldl f) z xs
 
-    foldr1 f (Seq xs) = getElem (foldr1 f' xs)
+    foldr1 f (Seq _ xs) = getElem (foldr1 f' xs)
       where f' (Elem x) (Elem y) = Elem (f x y)
 
-    foldl1 f (Seq xs) = getElem (foldl1 f' xs)
+    foldl1 f (Seq _ xs) = getElem (foldl1 f' xs)
       where f' (Elem x) (Elem y) = Elem (f x y)
 
 #if MIN_VERSION_base(4,8,0)
@@ -226,10 +224,10 @@ instance Foldable Seq where
 #endif
 
 instance Traversable Seq where
-    traverse f (Seq xs) = Seq <$> traverse (traverse f) xs
+    traverse f (Seq n xs) = Seq n <$> traverse (traverse f) xs
 
 instance NFData a => NFData (Seq a) where
-    rnf (Seq xs) = rnf xs
+    rnf (Seq _ xs) = rnf xs
 
 instance Monad Seq where
     return = singleton
@@ -259,7 +257,7 @@ instance Ord a => Ord (Seq a) where
 
 #if TESTING
 instance Show a => Show (Seq a) where
-    showsPrec p (Seq x) = showsPrec p x
+    showsPrec p (Seq _ x) = showsPrec p x
 #else
 instance Show a => Show (Seq a) where
     showsPrec p xs = showParen (p > 10) $
@@ -287,7 +285,6 @@ instance Monoid (Seq a) where
 
 #include "Typeable.h"
 INSTANCE_TYPEABLE1(Seq,seqTc,"Seq")
-
 #if __GLASGOW_HASKELL__
 instance Data a => Data (Seq a) where
     gfoldl f z s    = case viewl s of
@@ -314,95 +311,89 @@ consConstr  = mkConstr seqDataType "<|" [] Infix
 seqDataType :: DataType
 seqDataType = mkDataType "Data.Sequence.Seq" [emptyConstr, consConstr]
 #endif
-
 -- Finger trees
 
 data FingerTree a
     = Empty
     | Single a
-    | Deep {-# UNPACK #-} !Int !(Digit a) (FingerTree (Node a)) !(Digit a)
+    | Deep {-# UNPACK #-} !Int !(Digit a) (FingerTree (Node a)) {-# UNPACK #-} !Int !(Digit a)
 #if TESTING
     deriving Show
 #endif
 
-instance Sized a => Sized (FingerTree a) where
-    {-# SPECIALIZE instance Sized (FingerTree (Elem a)) #-}
-    {-# SPECIALIZE instance Sized (FingerTree (Node a)) #-}
-    size Empty              = 0
-    size (Single x)         = size x
-    size (Deep v _ _ _)     = v
-
 instance Foldable FingerTree where
     foldMap _ Empty = mempty
     foldMap f (Single x) = f x
-    foldMap f (Deep _ pr m sf) =
+    foldMap f (Deep _ pr m _ sf) =
         foldMap f pr `mappend` (foldMap (foldMap f) m `mappend` foldMap f sf)
 
     foldr _ z Empty = z
     foldr f z (Single x) = x `f` z
-    foldr f z (Deep _ pr m sf) =
+    foldr f z (Deep _ pr m _ sf) =
         foldr f (foldr (flip (foldr f)) (foldr f z sf) m) pr
 
     foldl _ z Empty = z
     foldl f z (Single x) = z `f` x
-    foldl f z (Deep _ pr m sf) =
+    foldl f z (Deep _ pr m _ sf) =
         foldl f (foldl (foldl f) (foldl f z pr) m) sf
 
     foldr1 _ Empty = error "foldr1: empty sequence"
     foldr1 _ (Single x) = x
-    foldr1 f (Deep _ pr m sf) =
+    foldr1 f (Deep _ pr m _ sf) =
         foldr f (foldr (flip (foldr f)) (foldr1 f sf) m) pr
 
     foldl1 _ Empty = error "foldl1: empty sequence"
     foldl1 _ (Single x) = x
-    foldl1 f (Deep _ pr m sf) =
+    foldl1 f (Deep _ pr m _ sf) =
         foldl f (foldl (foldl f) (foldl1 f pr) m) sf
 
 instance Functor FingerTree where
     fmap _ Empty = Empty
     fmap f (Single x) = Single (f x)
-    fmap f (Deep v pr m sf) =
-        Deep v (fmap f pr) (fmap (fmap f) m) (fmap f sf)
+    fmap f (Deep spr pr m ssf sf) =
+        Deep spr (fmap f pr) (fmap (fmap f) m) ssf (fmap f sf)
 
 instance Traversable FingerTree where
     traverse _ Empty = pure Empty
     traverse f (Single x) = Single <$> f x
-    traverse f (Deep v pr m sf) =
-        Deep v <$> traverse f pr <*> traverse (traverse f) m <*>
-            traverse f sf
+    traverse f (Deep spr pr m ssf sf) =
+        Deep spr <$> traverse f pr <*> traverse (traverse f) m <*>
+            pure ssf <*> traverse f sf
 
 instance NFData a => NFData (FingerTree a) where
     rnf (Empty) = ()
     rnf (Single x) = rnf x
-    rnf (Deep _ pr m sf) = rnf pr `seq` rnf sf `seq` rnf m
+    rnf (Deep _ pr m _ sf) = rnf pr `seq` rnf sf `seq` rnf m
 
+{-
 {-# INLINE deep #-}
 deep            :: Sized a => Digit a -> FingerTree (Node a) -> Digit a -> FingerTree a
-deep pr m sf    =  Deep (size pr + size m + size sf) pr m sf
+deep pr m sf    =  Deep (size pr) pr m (size sf) sf
+-}
 
 {-# INLINE pullL #-}
-pullL :: Sized a => Int -> FingerTree (Node a) -> Digit a -> FingerTree a
-pullL s m sf = case viewLTree m of
-    Nothing2        -> digitToTree' s sf
-    Just2 pr m'     -> Deep s (nodeToDigit pr) m' sf
+pullL :: Sized a => FingerTree (Node a) -> Int -> Digit a -> FingerTree a
+pullL m ssf sf = case viewLTree m of
+    Nothing2        -> digitToTree' ssf sf
+    Just2 pr m'     -> Deep (size pr) (nodeToDigit pr) m' ssf sf
 
 {-# INLINE pullR #-}
 pullR :: Sized a => Int -> Digit a -> FingerTree (Node a) -> FingerTree a
-pullR s pr m = case viewRTree m of
-    Nothing2        -> digitToTree' s pr
-    Just2 m' sf     -> Deep s pr m' (nodeToDigit sf)
+pullR spr pr m = case viewRTree m of
+    Nothing2        -> digitToTree' spr pr
+    Just2 m' sf     -> Deep spr pr m' (size sf) (nodeToDigit sf)
 
-{-# SPECIALIZE deepL :: Maybe (Digit (Elem a)) -> FingerTree (Node (Elem a)) -> Digit (Elem a) -> FingerTree (Elem a) #-}
-{-# SPECIALIZE deepL :: Maybe (Digit (Node a)) -> FingerTree (Node (Node a)) -> Digit (Node a) -> FingerTree (Node a) #-}
-deepL :: Sized a => Maybe (Digit a) -> FingerTree (Node a) -> Digit a -> FingerTree a
-deepL Nothing m sf      = pullL (size m + size sf) m sf
-deepL (Just pr) m sf    = deep pr m sf
+{-# SPECIALIZE deepL :: Maybe (Digit (Elem a)) -> FingerTree (Node (Elem a)) -> Int -> Digit (Elem a) -> FingerTree (Elem a) #-}
+{-# SPECIALIZE deepL :: Maybe (Digit (Node a)) -> FingerTree (Node (Node a)) -> Int -> Digit (Node a) -> FingerTree (Node a) #-}
+deepL :: Sized a => Maybe (Digit a) -> FingerTree (Node a) -> Int -> Digit a -> FingerTree a
+deepL Nothing m ssf sf      = pullL m ssf sf
+deepL (Just pr) m ssf sf    = Deep (size pr) pr m ssf sf
 
-{-# SPECIALIZE deepR :: Digit (Elem a) -> FingerTree (Node (Elem a)) -> Maybe (Digit (Elem a)) -> FingerTree (Elem a) #-}
-{-# SPECIALIZE deepR :: Digit (Node a) -> FingerTree (Node (Node a)) -> Maybe (Digit (Node a)) -> FingerTree (Node a) #-}
-deepR :: Sized a => Digit a -> FingerTree (Node a) -> Maybe (Digit a) -> FingerTree a
-deepR pr m Nothing      = pullR (size m + size pr) pr m
-deepR pr m (Just sf)    = deep pr m sf
+{-# SPECIALIZE deepR :: Int -> Digit (Elem a) -> FingerTree (Node (Elem a)) -> Maybe (Digit (Elem a)) -> FingerTree (Elem a) #-}
+{-# SPECIALIZE deepR :: Int -> Digit (Node a) -> FingerTree (Node (Node a)) -> Maybe (Digit (Node a)) -> FingerTree (Node a) #-}
+deepR :: Sized a => Int -> Digit a -> FingerTree (Node a) -> Maybe (Digit a) -> FingerTree a
+deepR spr pr m Nothing      = pullR spr pr m
+deepR spr pr m (Just sf)    = Deep spr pr m (size sf) sf
 
 -- Digits
 
@@ -414,6 +405,12 @@ data Digit a
 #if TESTING
     deriving Show
 #endif
+
+instance Sized a => Sized (Digit a) where
+    size (One a) = size a
+    size (Two a b) = size a + size b
+    size (Three a b c) = size a + size b + size c
+    size (Four a b c d) = size a + size b + size c + size d
 
 instance Foldable Digit where
     foldMap f (One a) = f a
@@ -461,24 +458,20 @@ instance NFData a => NFData (Digit a) where
     rnf (Three a b c) = rnf a `seq` rnf b `seq` rnf c
     rnf (Four a b c d) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d
 
-instance Sized a => Sized (Digit a) where
-    {-# INLINE size #-}
-    size = foldl1 (+) . fmap size
-
 {-# SPECIALIZE digitToTree :: Digit (Elem a) -> FingerTree (Elem a) #-}
 {-# SPECIALIZE digitToTree :: Digit (Node a) -> FingerTree (Node a) #-}
 digitToTree     :: Sized a => Digit a -> FingerTree a
 digitToTree (One a) = Single a
-digitToTree (Two a b) = deep (One a) Empty (One b)
-digitToTree (Three a b c) = deep (Two a b) Empty (One c)
-digitToTree (Four a b c d) = deep (Two a b) Empty (Two c d)
+digitToTree (Two a b) = Deep (size a) (One a) Empty (size b) (One b)
+digitToTree (Three a b c) = Deep (size a + size b) (Two a b) Empty (size c) (One c)
+digitToTree (Four a b c d) = Deep (size a + size b) (Two a b) Empty (size c + size d) (Two c d)
 
 -- | Given the size of a digit and the digit itself, efficiently converts
 -- it to a FingerTree.
-digitToTree' :: Int -> Digit a -> FingerTree a
-digitToTree' n (Four a b c d) = Deep n (Two a b) Empty (Two c d)
-digitToTree' n (Three a b c) = Deep n (Two a b) Empty (One c)
-digitToTree' n (Two a b) = Deep n (One a) Empty (One b)
+digitToTree' :: Sized a => Int -> Digit a -> FingerTree a
+digitToTree' n (Four a b c d) = Deep (size a + size b) (Two a b) Empty (n - (size a + size b)) (Two c d)
+digitToTree' n (Three a b c) = Deep (n - size c) (Two a b) Empty (size c) (One c)
+digitToTree' n (Two a b) = Deep (size a) (One a) Empty (n - size a) (One b)
 digitToTree' n (One a) = n `seq` Single a
 
 -- Nodes
@@ -605,23 +598,22 @@ applicativeTree :: Applicative f => Int -> Int -> f a -> f (FingerTree a)
 applicativeTree n mSize m = mSize `seq` case n of
     0 -> pure Empty
     1 -> fmap Single m
-    2 -> deepA one emptyTree one
-    3 -> deepA two emptyTree one
-    4 -> deepA two emptyTree two
-    5 -> deepA three emptyTree two
-    6 -> deepA three emptyTree three
-    7 -> deepA four emptyTree three
-    8 -> deepA four emptyTree four
+    2 -> Deep <$> pure mSize <*> one <*> emptyTree <*> pure mSize <*> one
+    3 -> Deep <$> pure (2*mSize) <*> two <*> emptyTree <*> pure mSize <*> one
+    4 -> Deep <$> pure (2*mSize) <*> two <*> emptyTree <*> pure (2*mSize) <*> two
+    5 -> Deep <$> pure (3*mSize) <*> three <*> emptyTree <*> pure (2*mSize) <*> two
+    6 -> Deep <$> pure (3*mSize) <*> three <*> emptyTree <*> pure (3*mSize) <*> three
+    7 -> Deep <$> pure (4*mSize) <*> four <*> emptyTree <*> pure (3*mSize) <*> three
+    8 -> Deep <$> pure (4*mSize) <*> four <*> emptyTree <*> pure (4*mSize) <*> four
     _ -> case n `quotRem` 3 of
-           (q,0) -> deepA three (applicativeTree (q - 2) mSize' n3) three
-           (q,1) -> deepA four  (applicativeTree (q - 2) mSize' n3) three
-           (q,_) -> deepA four  (applicativeTree (q - 2) mSize' n3) four
+           (q,0) -> Deep <$> pure (3*mSize) <*> three <*> (applicativeTree (q - 2) mSize' n3) <*> pure (3*mSize) <*> three
+           (q,1) -> Deep <$> pure (4*mSize) <*> four <*>  (applicativeTree (q - 2) mSize' n3) <*> pure (3*mSize) <*> three
+           (q,_) -> Deep <$> pure (4*mSize) <*> four <*> (applicativeTree (q - 2) mSize' n3) <*> pure (4*mSize) <*> four
   where
     one = fmap One m
     two = liftA2 Two m m
     three = liftA3 Three m m m
     four = liftA3 Four m m m <*> m
-    deepA = liftA3 (Deep (n * mSize))
     mSize' = 3 * mSize
     n3 = liftA3 (Node3 mSize') m m m
     emptyTree = pure Empty
@@ -632,11 +624,11 @@ applicativeTree n mSize m = mSize `seq` case n of
 
 -- | /O(1)/. The empty sequence.
 empty           :: Seq a
-empty           =  Seq Empty
+empty           =  Seq 0 Empty
 
 -- | /O(1)/. A singleton sequence.
 singleton       :: a -> Seq a
-singleton x     =  Seq (Single (Elem x))
+singleton x     =  Seq 1 (Single (Elem x))
 
 -- | /O(log n)/. @replicate n x@ is a sequence consisting of @n@ copies of @x@.
 replicate       :: Int -> a -> Seq a
@@ -650,7 +642,7 @@ replicate n x
 -- > replicateA n x = sequenceA (replicate n x)
 replicateA :: Applicative f => Int -> f a -> f (Seq a)
 replicateA n x
-  | n >= 0      = Seq <$> applicativeTree n 1 (Elem <$> x)
+  | n >= 0      = Seq n <$> applicativeTree n 1 (Elem <$> x)
   | otherwise   = error "replicateA takes a nonnegative integer argument"
 
 -- | 'replicateM' is a sequence counterpart of 'Control.Monad.replicateM'.
@@ -669,284 +661,326 @@ replicateSeq n xs
   | otherwise = go n xs
   where
     -- Invariant: k >= 1
-    go 1 xs = xs
-    go k xs | even k    = kxs
-            | otherwise = xs >< kxs
-            where kxs = go (k `quot` 2) $! (xs >< xs)
+    go 1 ys = ys
+    go k ys | even k    = kys
+            | otherwise = ys >< kys
+            where kys = go (k `quot` 2) $! (ys >< ys)
 
 -- | /O(1)/. Add an element to the left end of a sequence.
 -- Mnemonic: a triangle with the single element at the pointy end.
 (<|)            :: a -> Seq a -> Seq a
-x <| Seq xs     =  Seq (Elem x `consTree` xs)
+x <| Seq n xs     =  Seq (n+1) (consTree (Elem x) n xs)
 
-{-# SPECIALIZE consTree :: Elem a -> FingerTree (Elem a) -> FingerTree (Elem a) #-}
-{-# SPECIALIZE consTree :: Node a -> FingerTree (Node a) -> FingerTree (Node a) #-}
-consTree        :: Sized a => a -> FingerTree a -> FingerTree a
-consTree a Empty        = Single a
-consTree a (Single b)   = deep (One a) Empty (One b)
-consTree a (Deep s (Four b c d e) m sf) = m `seq`
-    Deep (size a + s) (Two a b) (node3 c d e `consTree` m) sf
-consTree a (Deep s (Three b c d) m sf) =
-    Deep (size a + s) (Four a b c d) m sf
-consTree a (Deep s (Two b c) m sf) =
-    Deep (size a + s) (Three a b c) m sf
-consTree a (Deep s (One b) m sf) =
-    Deep (size a + s) (Two a b) m sf
+{-# SPECIALIZE consTree :: Elem a -> Int -> FingerTree (Elem a) -> FingerTree (Elem a) #-}
+{-# SPECIALIZE consTree :: Node a -> Int -> FingerTree (Node a) -> FingerTree (Node a) #-}
+consTree        :: Sized a => a -> Int -> FingerTree a -> FingerTree a
+consTree a st Empty        = st `seq` Single a
+consTree a st (Single b)   = Deep (size a) (One a) Empty st (One b)
+consTree a st (Deep spr (Four b c d e) m ssf sf) = m `seq`
+    Deep (size a + size b)
+         (Two a b)
+         (consTree (Node3 (spr - size b) c d e) (st - (spr + ssf)) m)
+         ssf
+         sf
+consTree a st (Deep spr (Three b c d) m ssf sf) = st `seq`
+    Deep (size a + spr) (Four a b c d) m ssf sf
+consTree a st (Deep spr (Two b c) m  ssf sf) = st `seq`
+    Deep (size a + spr) (Three a b c) m ssf sf
+consTree a st (Deep spr (One b) m ssf sf) = st `seq`
+    Deep (size a + spr) (Two a b) m ssf sf
+
+consTree2 :: Sized a => a -> a -> Int -> FingerTree a -> FingerTree a
+consTree2 a b st t = consTree a (size b + st) (consTree b st t)
+
+consTree3 :: Sized a => a -> a -> a -> Int -> FingerTree a -> FingerTree a
+consTree3 a b c st t = consTree a (size b + size c + st) (consTree2 b c st t)
+
+consTree4 :: Sized a => a -> a -> a -> a -> Int -> FingerTree a -> FingerTree a
+consTree4 a b c d st t = consTree a (size b + size c + size d + st) (consTree3 b c d st t)
+
+consTree5 :: Sized a => a -> a -> a -> a -> a -> Int -> FingerTree a -> FingerTree a
+consTree5 a b c d e st t = consTree a (size b + size c + size d + size e + st) (consTree4 b c d e st t)
 
 -- | /O(1)/. Add an element to the right end of a sequence.
 -- Mnemonic: a triangle with the single element at the pointy end.
 (|>)            :: Seq a -> a -> Seq a
-Seq xs |> x     =  Seq (xs `snocTree` Elem x)
+Seq n xs |> x     =  Seq (n+1) (snocTree n xs (Elem x))
 
-{-# SPECIALIZE snocTree :: FingerTree (Elem a) -> Elem a -> FingerTree (Elem a) #-}
-{-# SPECIALIZE snocTree :: FingerTree (Node a) -> Node a -> FingerTree (Node a) #-}
-snocTree        :: Sized a => FingerTree a -> a -> FingerTree a
-snocTree Empty a        =  Single a
-snocTree (Single a) b   =  deep (One a) Empty (One b)
-snocTree (Deep s pr m (Four a b c d)) e = m `seq`
-    Deep (s + size e) pr (m `snocTree` node3 a b c) (Two d e)
-snocTree (Deep s pr m (Three a b c)) d =
-    Deep (s + size d) pr m (Four a b c d)
-snocTree (Deep s pr m (Two a b)) c =
-    Deep (s + size c) pr m (Three a b c)
-snocTree (Deep s pr m (One a)) b =
-    Deep (s + size b) pr m (Two a b)
+{-# SPECIALIZE snocTree :: Int -> FingerTree (Elem a) -> Elem a -> FingerTree (Elem a) #-}
+{-# SPECIALIZE snocTree :: Int -> FingerTree (Node a) -> Node a -> FingerTree (Node a) #-}
+snocTree        :: Sized a => Int -> FingerTree a -> a -> FingerTree a
+snocTree st Empty a        = st `seq` Single a
+snocTree st (Single a) b   = Deep st (One a) Empty (size b) (One b)
+snocTree st (Deep spr pr m ssf (Four a b c d)) e = m `seq`
+    Deep spr
+         pr
+         (snocTree (st - (spr + ssf)) m (Node3 (ssf - size d) a b c))
+         (size d + size e)
+         (Two d e)
+snocTree st (Deep spr pr m ssf (Three a b c)) d = st `seq`
+    Deep spr pr m (ssf + size d) (Four a b c d)
+snocTree st (Deep spr pr m ssf (Two a b)) c = st `seq`
+    Deep spr pr m (ssf + size c) (Three a b c)
+snocTree st (Deep spr pr m ssf (One a)) b = st `seq`
+    Deep spr pr m (ssf + size b) (Two a b)
+
+snocTree2        :: Sized a => Int -> FingerTree a -> a -> a -> FingerTree a
+snocTree2 st t a b = snocTree (st + size a) (snocTree st t a) b
+
+snocTree3        :: Sized a => Int -> FingerTree a -> a -> a -> a -> FingerTree a
+snocTree3 st t a b c = snocTree (st + size a + size b) (snocTree2 st t a b) c
+
+snocTree4        :: Sized a => Int -> FingerTree a -> a -> a -> a -> a -> FingerTree a
+snocTree4 st t a b c d = snocTree (st + size a + size b + size c) (snocTree3 st t a b c) d
+
+snocTree5        :: Sized a => Int -> FingerTree a -> a -> a -> a -> a -> a -> FingerTree a
+snocTree5 st t a b c d e = snocTree (st + size a + size b + size c + size d) (snocTree4 st t a b c d) e
 
 -- | /O(log(min(n1,n2)))/. Concatenate two sequences.
 (><)            :: Seq a -> Seq a -> Seq a
-Seq xs >< Seq ys = Seq (appendTree0 xs ys)
+Seq sxs xs >< Seq sys ys = Seq (sxs + sys) (appendTree0 sxs xs sys ys)
 
 -- The appendTree/addDigits gunk below is machine generated
 
-appendTree0 :: FingerTree (Elem a) -> FingerTree (Elem a) -> FingerTree (Elem a)
-appendTree0 Empty xs =
+appendTree0 :: Int -> FingerTree (Elem a) -> Int -> FingerTree (Elem a) -> FingerTree (Elem a)
+appendTree0 sxs Empty sys ys = sxs `seq` sys `seq`
+    ys
+appendTree0 sxs xs sys Empty = sxs `seq` sys `seq`
     xs
-appendTree0 xs Empty =
-    xs
-appendTree0 (Single x) xs =
-    x `consTree` xs
-appendTree0 xs (Single x) =
-    xs `snocTree` x
-appendTree0 (Deep s1 pr1 m1 sf1) (Deep s2 pr2 m2 sf2) =
-    Deep (s1 + s2) pr1 (addDigits0 m1 sf1 pr2 m2) sf2
+appendTree0 sxs (Single x) sys ys = sxs `seq`
+    consTree x sys ys
+appendTree0 sxs xs sys (Single y) = sys `seq`
+    snocTree sxs xs y
+appendTree0 sxs (Deep spr1 pr1 m1 ssf1 sf1) sys (Deep spr2 pr2 m2 ssf2 sf2) =
+    Deep spr1
+         pr1
+         (addDigits0 (sxs - (spr1 + ssf1)) m1 ssf1 sf1 spr2 pr2 (sys - (spr2 + ssf2)) m2)
+         ssf2
+         sf2
 
-addDigits0 :: FingerTree (Node (Elem a)) -> Digit (Elem a) -> Digit (Elem a) -> FingerTree (Node (Elem a)) -> FingerTree (Node (Elem a))
-addDigits0 m1 (One a) (One b) m2 =
-    appendTree1 m1 (node2 a b) m2
-addDigits0 m1 (One a) (Two b c) m2 =
-    appendTree1 m1 (node3 a b c) m2
-addDigits0 m1 (One a) (Three b c d) m2 =
-    appendTree2 m1 (node2 a b) (node2 c d) m2
-addDigits0 m1 (One a) (Four b c d e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits0 m1 (Two a b) (One c) m2 =
-    appendTree1 m1 (node3 a b c) m2
-addDigits0 m1 (Two a b) (Two c d) m2 =
-    appendTree2 m1 (node2 a b) (node2 c d) m2
-addDigits0 m1 (Two a b) (Three c d e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits0 m1 (Two a b) (Four c d e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits0 m1 (Three a b c) (One d) m2 =
-    appendTree2 m1 (node2 a b) (node2 c d) m2
-addDigits0 m1 (Three a b c) (Two d e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits0 m1 (Three a b c) (Three d e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits0 m1 (Three a b c) (Four d e f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits0 m1 (Four a b c d) (One e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits0 m1 (Four a b c d) (Two e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits0 m1 (Four a b c d) (Three e f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits0 m1 (Four a b c d) (Four e f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
+addDigits0 :: Int -> FingerTree (Node (Elem a)) -> Int -> Digit (Elem a) -> Int -> Digit (Elem a) -> Int -> FingerTree (Node (Elem a)) -> FingerTree (Node (Elem a))
+addDigits0 sm1 m1 sa (One a) sb (One b) sm2 m2 =
+    appendTree1 sm1 m1 (Node2 (sa + sb) a b) sm2 m2
+addDigits0 sm1 m1 sa (One a) sbc (Two b c) sm2 m2 =
+    appendTree1 sm1 m1 (Node3 (sa + sbc) a b c) sm2 m2
+addDigits0 sm1 m1 sa (One a) sbcd (Three b c d) sm2 m2 =
+    appendTree2 sm1 m1 (Node2 (sa + size b) a b) (Node2 (sbcd - size b) c d) sm2 m2
+addDigits0 sm1 m1 sa (One a) sbcde (Four b c d e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sa + (size b + size c)) a b c) (Node2 (sbcde - (size b + size c)) d e) sm2 m2
+addDigits0 sm1 m1 sab (Two a b) sc (One c) sm2 m2 =
+    appendTree1 sm1 m1 (Node3 (sab + sc) a b c) sm2 m2
+addDigits0 sm1 m1 sab (Two a b) scd (Two c d) sm2 m2 =
+    appendTree2 sm1 m1 (Node2 sab a b) (Node2 scd c d) sm2 m2
+addDigits0 sm1 m1 sab (Two a b) scde (Three c d e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node2 (scde - size c) d e) sm2 m2
+addDigits0 sm1 m1 sab (Two a b) scdef (Four c d e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node3 (scdef - size c) d e f) sm2 m2
+addDigits0 sm1 m1 sabc (Three a b c) sd (One d) sm2 m2 =
+    appendTree2 sm1 m1 (Node2 (sabc - size c) a b) (Node2 (size c + sd) c d) sm2 m2
+addDigits0 sm1 m1 sabc (Three a b c) sde (Two d e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 sabc a b c) (Node2 sde d e) sm2 m2
+addDigits0 sm1 m1 sabc (Three a b c) sdef (Three d e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 sabc a b c) (Node3 sdef d e f) sm2 m2
+addDigits0 sm1 m1 sabc (Three a b c) sdefg (Four d e f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node2 d e)
+                                          (Node2 (sdefg - (size d + size e)) f g) sm2 m2
+addDigits0 sm1 m1 sabcd (Four a b c d) se (One e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sabcd - size d) a b c) (Node2 (size d + se) d e) sm2 m2
+addDigits0 sm1 m1 sabcd (Four a b c d) sef (Two e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sabcd - size d) a b c) (Node3 (size d + sef) d e f) sm2 m2
+addDigits0 sm1 m1 sabcd (Four a b c d) sefg (Three e f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node2 d e) (Node2 (sefg - size e) f g) sm2 m2
+addDigits0 sm1 m1 sabcd (Four a b c d) sefgh (Four e f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f)
+              (Node2 (sefgh - (size e + size f)) g h) sm2 m2
 
-appendTree1 :: FingerTree (Node a) -> Node a -> FingerTree (Node a) -> FingerTree (Node a)
-appendTree1 Empty a xs =
-    a `consTree` xs
-appendTree1 xs a Empty =
-    xs `snocTree` a
-appendTree1 (Single x) a xs =
-    x `consTree` a `consTree` xs
-appendTree1 xs a (Single x) =
-    xs `snocTree` a `snocTree` x
-appendTree1 (Deep s1 pr1 m1 sf1) a (Deep s2 pr2 m2 sf2) =
-    Deep (s1 + size a + s2) pr1 (addDigits1 m1 sf1 a pr2 m2) sf2
+appendTree1 :: Int -> FingerTree (Node a) -> Node a -> Int -> FingerTree (Node a) -> FingerTree (Node a)
+appendTree1 sxs Empty a sys ys = sxs `seq`
+    consTree a sys ys
+appendTree1 sxs xs a sys Empty = sys `seq`
+    snocTree sxs xs a
+appendTree1 sxs (Single x) a sys ys = sxs `seq`
+    consTree2 x a sys ys
+appendTree1 sxs xs a sys (Single y) = sys `seq`
+    snocTree2 sxs xs a y
+appendTree1 sxs (Deep spr1 pr1 m1 ssf1 sf1) a sys (Deep spr2 pr2 m2 ssf2 sf2) =
+    Deep spr1
+         pr1
+         (addDigits1 (sxs - (spr1 + ssf1)) m1 ssf1 sf1 a spr2 pr2 (sys - (spr2 + ssf2)) m2)
+         ssf2
+         sf2
 
-addDigits1 :: FingerTree (Node (Node a)) -> Digit (Node a) -> Node a -> Digit (Node a) -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
-addDigits1 m1 (One a) b (One c) m2 =
-    appendTree1 m1 (node3 a b c) m2
-addDigits1 m1 (One a) b (Two c d) m2 =
-    appendTree2 m1 (node2 a b) (node2 c d) m2
-addDigits1 m1 (One a) b (Three c d e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits1 m1 (One a) b (Four c d e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits1 m1 (Two a b) c (One d) m2 =
-    appendTree2 m1 (node2 a b) (node2 c d) m2
-addDigits1 m1 (Two a b) c (Two d e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits1 m1 (Two a b) c (Three d e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits1 m1 (Two a b) c (Four d e f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits1 m1 (Three a b c) d (One e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits1 m1 (Three a b c) d (Two e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits1 m1 (Three a b c) d (Three e f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits1 m1 (Three a b c) d (Four e f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits1 m1 (Four a b c d) e (One f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits1 m1 (Four a b c d) e (Two f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits1 m1 (Four a b c d) e (Three f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits1 m1 (Four a b c d) e (Four f g h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
+addDigits1 :: Int -> FingerTree (Node (Node a)) -> Int -> Digit (Node a) -> Node a -> Int -> Digit (Node a) -> Int -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
+addDigits1 sm1 m1 sa (One a) b sc (One c) sm2 m2 =
+    appendTree1 sm1 m1 (Node3 (sa + size b + sc) a b c) sm2 m2
+addDigits1 sm1 m1 sa (One a) b scd (Two c d) sm2 m2 =
+    appendTree2 sm1 m1 (Node2 (sa + size b) a b) (Node2 scd c d) sm2 m2
+addDigits1 sm1 m1 sa (One a) b scde (Three c d e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sa + size b + size c) a b c) (Node2 (scde - size c) d e) sm2 m2
+addDigits1 sm1 m1 sa (One a) b scdef (Four c d e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sa + size b + size c) a b c) (Node3 (scdef - size c) d e f) sm2 m2
+addDigits1 sm1 m1 sab (Two a b) c sd (One d) sm2 m2 =
+    appendTree2 sm1 m1 (Node2 sab a b) (Node2 (size c + sd) c d) sm2 m2
+addDigits1 sm1 m1 sab (Two a b) c sde (Two d e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node2 sde d e) sm2 m2
+addDigits1 sm1 m1 sab (Two a b) c sdef (Three d e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node3 sdef d e f) sm2 m2
+addDigits1 sm1 m1 sab (Two a b) c sdefg (Four d e f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node2 d e) (Node2 (sdefg - (size d + size e)) f g) sm2 m2
+addDigits1 sm1 m1 sabc (Three a b c) d se (One e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 sabc a b c) (Node2 (size d + se) d e) sm2 m2
+addDigits1 sm1 m1 sabc (Three a b c) d sef (Two e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 sabc a b c) (Node3 (size d + sef) d e f) sm2 m2
+addDigits1 sm1 m1 sabc (Three a b c) d sefg (Three e f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node2 d e) (Node2 (sefg - size e) f g) sm2 m2
+addDigits1 sm1 m1 sabc (Three a b c) d sefgh (Four e f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node3 d e f) (Node2 (sefgh - (size e + size f)) g h) sm2 m2
+addDigits1 sm1 m1 sabcd (Four a b c d) e sf (One f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sabcd - size d) a b c) (Node3 (size d + size e + sf) d e f) sm2 m2
+addDigits1 sm1 m1 sabcd (Four a b c d) e sfg (Two f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node2 d e) (Node2 sfg f g) sm2 m2
+addDigits1 sm1 m1 sabcd (Four a b c d) e sfgh (Three f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (Node2 (sfgh - size f) g h) sm2 m2
+addDigits1 sm1 m1 sabcd (Four a b c d) e sfghi (Four f g h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (Node3 (sfghi - size f) g h i) sm2 m2
 
-appendTree2 :: FingerTree (Node a) -> Node a -> Node a -> FingerTree (Node a) -> FingerTree (Node a)
-appendTree2 Empty a b xs =
-    a `consTree` b `consTree` xs
-appendTree2 xs a b Empty =
-    xs `snocTree` a `snocTree` b
-appendTree2 (Single x) a b xs =
-    x `consTree` a `consTree` b `consTree` xs
-appendTree2 xs a b (Single x) =
-    xs `snocTree` a `snocTree` b `snocTree` x
-appendTree2 (Deep s1 pr1 m1 sf1) a b (Deep s2 pr2 m2 sf2) =
-    Deep (s1 + size a + size b + s2) pr1 (addDigits2 m1 sf1 a b pr2 m2) sf2
+appendTree2 :: Int -> FingerTree (Node a) -> Node a -> Node a -> Int -> FingerTree (Node a) -> FingerTree (Node a)
+appendTree2 sxs Empty a b sys ys = sxs `seq`
+    consTree2 a b sys ys
+appendTree2 sxs xs a b sys Empty = sys `seq`
+    snocTree2 sxs xs a b
+appendTree2 sxs (Single x) a b sys ys = sxs `seq`
+    consTree3 x a b sys ys
+appendTree2 sxs xs a b sys (Single y) = sys `seq`
+    snocTree3 sxs xs a b y
+appendTree2 sxs (Deep spr1 pr1 m1 ssf1 sf1) a b sys (Deep spr2 pr2 m2 ssf2 sf2) =
+    Deep spr1 pr1 (addDigits2 (sxs - (spr1 + ssf1)) m1 ssf1 sf1 a b spr2 pr2 (sys - (spr2 + ssf2)) m2) ssf2 sf2
 
-addDigits2 :: FingerTree (Node (Node a)) -> Digit (Node a) -> Node a -> Node a -> Digit (Node a) -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
-addDigits2 m1 (One a) b c (One d) m2 =
-    appendTree2 m1 (node2 a b) (node2 c d) m2
-addDigits2 m1 (One a) b c (Two d e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits2 m1 (One a) b c (Three d e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits2 m1 (One a) b c (Four d e f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits2 m1 (Two a b) c d (One e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits2 m1 (Two a b) c d (Two e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits2 m1 (Two a b) c d (Three e f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits2 m1 (Two a b) c d (Four e f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits2 m1 (Three a b c) d e (One f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits2 m1 (Three a b c) d e (Two f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits2 m1 (Three a b c) d e (Three f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits2 m1 (Three a b c) d e (Four f g h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits2 m1 (Four a b c d) e f (One g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits2 m1 (Four a b c d) e f (Two g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits2 m1 (Four a b c d) e f (Three g h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits2 m1 (Four a b c d) e f (Four g h i j) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node2 g h) (node2 i j) m2
+addDigits2 :: Int -> FingerTree (Node (Node a)) -> Int -> Digit (Node a) -> Node a -> Node a -> Int -> Digit (Node a) -> Int -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
+addDigits2 sm1 m1 sa (One a) b c sd (One d) sm2 m2 =
+    appendTree2 sm1 m1 (Node2 (sa + size b) a b) (Node2 (size c + sd) c d) sm2 m2
+addDigits2 sm1 m1 sa (One a) b c sde (Two d e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sa + size b + size c) a b c) (Node2 sde d e) sm2 m2
+addDigits2 sm1 m1 sa (One a) b c sdef (Three d e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sa + size b + size c) a b c) (Node3 sdef d e f) sm2 m2
+addDigits2 sm1 m1 sa (One a) b c sdefg (Four d e f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sa + size b + size c) a b c) (node2 d e) (Node2 (sdefg - (size d + size e)) f g) sm2 m2
+addDigits2 sm1 m1 sab (Two a b) c d se (One e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node2 (size d + se) d e) sm2 m2
+addDigits2 sm1 m1 sab (Two a b) c d sef (Two e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node3 (size d + sef) d e f) sm2 m2
+addDigits2 sm1 m1 sab (Two a b) c d sefg (Three e f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node2 d e) (Node2 (sefg - size e) f g) sm2 m2
+addDigits2 sm1 m1 sab (Two a b) c d sefgh (Four e f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node3 d e f) (Node2 (sefgh - (size e + size f)) g h) sm2 m2
+addDigits2 sm1 m1 sabc (Three a b c) d e sf (One f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 sabc a b c) (Node3 (size d + size e + sf) d e f) sm2 m2
+addDigits2 sm1 m1 sabc (Three a b c) d e sfg (Two f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node2 d e) (Node2 sfg f g) sm2 m2
+addDigits2 sm1 m1 sabc (Three a b c) d e sfgh (Three f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node3 d e f) (Node2 (sfgh - size f) g h) sm2 m2
+addDigits2 sm1 m1 sabc (Three a b c) d e sfghi (Four f g h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node3 d e f) (Node3 (sfghi - size f) g h i) sm2 m2
+addDigits2 sm1 m1 sabcd (Four a b c d) e f sg (One g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node2 d e) (Node2 (size f + sg) f g) sm2 m2
+addDigits2 sm1 m1 sabcd (Four a b c d) e f sgh (Two g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (Node2 sgh g h) sm2 m2
+addDigits2 sm1 m1 sabcd (Four a b c d) e f sghi (Three g h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (Node3 sghi g h i) sm2 m2
+addDigits2 sm1 m1 sabcd (Four a b c d) e f sghij (Four g h i j) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (node2 g h) (Node2 (sghij - (size g + size h)) i j) sm2 m2
 
-appendTree3 :: FingerTree (Node a) -> Node a -> Node a -> Node a -> FingerTree (Node a) -> FingerTree (Node a)
-appendTree3 Empty a b c xs =
-    a `consTree` b `consTree` c `consTree` xs
-appendTree3 xs a b c Empty =
-    xs `snocTree` a `snocTree` b `snocTree` c
-appendTree3 (Single x) a b c xs =
-    x `consTree` a `consTree` b `consTree` c `consTree` xs
-appendTree3 xs a b c (Single x) =
-    xs `snocTree` a `snocTree` b `snocTree` c `snocTree` x
-appendTree3 (Deep s1 pr1 m1 sf1) a b c (Deep s2 pr2 m2 sf2) =
-    Deep (s1 + size a + size b + size c + s2) pr1 (addDigits3 m1 sf1 a b c pr2 m2) sf2
+appendTree3 :: Int -> FingerTree (Node a) -> Node a -> Node a -> Node a -> Int -> FingerTree (Node a) -> FingerTree (Node a)
+appendTree3 sxs Empty a b c sys ys = sxs `seq`
+    consTree3 a b c sys ys
+appendTree3 sxs xs a b c sys Empty = sys `seq`
+    snocTree3 sxs xs a b c
+appendTree3 sxs (Single x) a b c sys ys = sxs `seq`
+    consTree4 x a b c sys ys
+appendTree3 sxs xs a b c sys (Single y) = sys `seq`
+    snocTree4 sxs xs a b c y
+appendTree3 sxs (Deep spr1 pr1 m1 ssf1 sf1) a b c sys (Deep spr2 pr2 m2 ssf2 sf2) =
+    Deep spr1 pr1 (addDigits3 (sxs - (spr1 + ssf1)) m1 ssf1 sf1 a b c spr2 pr2 (sys - (spr2 + ssf2)) m2) ssf2 sf2
 
-addDigits3 :: FingerTree (Node (Node a)) -> Digit (Node a) -> Node a -> Node a -> Node a -> Digit (Node a) -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
-addDigits3 m1 (One a) b c d (One e) m2 =
-    appendTree2 m1 (node3 a b c) (node2 d e) m2
-addDigits3 m1 (One a) b c d (Two e f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits3 m1 (One a) b c d (Three e f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits3 m1 (One a) b c d (Four e f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits3 m1 (Two a b) c d e (One f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits3 m1 (Two a b) c d e (Two f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits3 m1 (Two a b) c d e (Three f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits3 m1 (Two a b) c d e (Four f g h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits3 m1 (Three a b c) d e f (One g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits3 m1 (Three a b c) d e f (Two g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits3 m1 (Three a b c) d e f (Three g h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits3 m1 (Three a b c) d e f (Four g h i j) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node2 g h) (node2 i j) m2
-addDigits3 m1 (Four a b c d) e f g (One h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits3 m1 (Four a b c d) e f g (Two h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits3 m1 (Four a b c d) e f g (Three h i j) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node2 g h) (node2 i j) m2
-addDigits3 m1 (Four a b c d) e f g (Four h i j k) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node3 g h i) (node2 j k) m2
+addDigits3 :: Int -> FingerTree (Node (Node a)) -> Int -> Digit (Node a) -> Node a -> Node a -> Node a -> Int -> Digit (Node a) -> Int -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
+addDigits3 sm1 m1 sa (One a) b c d se (One e) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sa + size b + size c) a b c) (Node2 (size d + se) d e) sm2 m2
+addDigits3 sm1 m1 sa (One a) b c d sef (Two e f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sa + size b + size c) a b c) (Node3 (size d + sef) d e f) sm2 m2
+addDigits3 sm1 m1 sa (One a) b c d sefg (Three e f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sa + size b + size c) a b c) (node2 d e) (Node2 (sefg - size e) f g) sm2 m2
+addDigits3 sm1 m1 sa (One a) b c d sefgh (Four e f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sa + size b + size c) a b c) (node3 d e f) (Node2 (sefgh - (size e + size f)) g h) sm2 m2
+addDigits3 sm1 m1 sab (Two a b) c d e sf (One f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node3 (size d + size e + sf) d e f) sm2 m2
+addDigits3 sm1 m1 sab (Two a b) c d e sfg (Two f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node2 d e) (Node2 sfg f g) sm2 m2
+addDigits3 sm1 m1 sab (Two a b) c d e sfgh (Three f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node3 d e f) (Node2 (sfgh - size f) g h) sm2 m2
+addDigits3 sm1 m1 sab (Two a b) c d e sfghi (Four f g h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node3 d e f) (Node3 (sfghi - size f) g h i) sm2 m2
+addDigits3 sm1 m1 sabc (Three a b c) d e f sg (One g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node2 d e) (Node2 (size f + sg) f g) sm2 m2
+addDigits3 sm1 m1 sabc (Three a b c) d e f sgh (Two g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node3 d e f) (Node2 sgh g h) sm2 m2
+addDigits3 sm1 m1 sabc (Three a b c) d e f sghi (Three g h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node3 d e f) (Node3 sghi g h i) sm2 m2
+addDigits3 sm1 m1 sabc (Three a b c) d e f sghij (Four g h i j) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 sabc a b c) (node3 d e f) (node2 g h) (Node2 (sghij - (size g + size h)) i j) sm2 m2
+addDigits3 sm1 m1 sabcd (Four a b c d) e f g sh (One h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (Node2 (size g + sh) g h) sm2 m2
+addDigits3 sm1 m1 sabcd (Four a b c d) e f g shi (Two h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (Node3 (size g + shi) g h i) sm2 m2
+addDigits3 sm1 m1 sabcd (Four a b c d) e f g shij (Three h i j) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (node2 g h) (Node2 (shij - size h) i j) sm2 m2
+addDigits3 sm1 m1 sabcd (Four a b c d) e f g shijk (Four h i j k) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (node3 g h i) (Node2 (shijk - (size h + size i)) j k) sm2 m2
 
-appendTree4 :: FingerTree (Node a) -> Node a -> Node a -> Node a -> Node a -> FingerTree (Node a) -> FingerTree (Node a)
-appendTree4 Empty a b c d xs =
-    a `consTree` b `consTree` c `consTree` d `consTree` xs
-appendTree4 xs a b c d Empty =
-    xs `snocTree` a `snocTree` b `snocTree` c `snocTree` d
-appendTree4 (Single x) a b c d xs =
-    x `consTree` a `consTree` b `consTree` c `consTree` d `consTree` xs
-appendTree4 xs a b c d (Single x) =
-    xs `snocTree` a `snocTree` b `snocTree` c `snocTree` d `snocTree` x
-appendTree4 (Deep s1 pr1 m1 sf1) a b c d (Deep s2 pr2 m2 sf2) =
-    Deep (s1 + size a + size b + size c + size d + s2) pr1 (addDigits4 m1 sf1 a b c d pr2 m2) sf2
+appendTree4 :: Int -> FingerTree (Node a) -> Node a -> Node a -> Node a -> Node a -> Int -> FingerTree (Node a) -> FingerTree (Node a)
+appendTree4 sxs Empty a b c d sys ys = sxs `seq`
+    consTree4 a b c d sys ys
+appendTree4 sxs xs a b c d sys Empty = sys `seq`
+    snocTree4 sxs xs a b c d
+appendTree4 sxs (Single x) a b c d sys ys = sxs `seq`
+    consTree5 x a b c d sys ys
+appendTree4 sxs xs a b c d sys (Single y) = sys `seq`
+    snocTree5 sxs xs a b c d y
+appendTree4 sxs (Deep spr1 pr1 m1 ssf1 sf1) a b c d sys (Deep spr2 pr2 m2 ssf2 sf2) =
+    Deep spr1 pr1 (addDigits4 (sxs - (spr1 + ssf1)) m1 ssf1 sf1 a b c d spr2 pr2 (sys - (spr2 + ssf2)) m2) ssf2 sf2
 
-addDigits4 :: FingerTree (Node (Node a)) -> Digit (Node a) -> Node a -> Node a -> Node a -> Node a -> Digit (Node a) -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
-addDigits4 m1 (One a) b c d e (One f) m2 =
-    appendTree2 m1 (node3 a b c) (node3 d e f) m2
-addDigits4 m1 (One a) b c d e (Two f g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits4 m1 (One a) b c d e (Three f g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits4 m1 (One a) b c d e (Four f g h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits4 m1 (Two a b) c d e f (One g) m2 =
-    appendTree3 m1 (node3 a b c) (node2 d e) (node2 f g) m2
-addDigits4 m1 (Two a b) c d e f (Two g h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits4 m1 (Two a b) c d e f (Three g h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits4 m1 (Two a b) c d e f (Four g h i j) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node2 g h) (node2 i j) m2
-addDigits4 m1 (Three a b c) d e f g (One h) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node2 g h) m2
-addDigits4 m1 (Three a b c) d e f g (Two h i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits4 m1 (Three a b c) d e f g (Three h i j) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node2 g h) (node2 i j) m2
-addDigits4 m1 (Three a b c) d e f g (Four h i j k) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node3 g h i) (node2 j k) m2
-addDigits4 m1 (Four a b c d) e f g h (One i) m2 =
-    appendTree3 m1 (node3 a b c) (node3 d e f) (node3 g h i) m2
-addDigits4 m1 (Four a b c d) e f g h (Two i j) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node2 g h) (node2 i j) m2
-addDigits4 m1 (Four a b c d) e f g h (Three i j k) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node3 g h i) (node2 j k) m2
-addDigits4 m1 (Four a b c d) e f g h (Four i j k l) m2 =
-    appendTree4 m1 (node3 a b c) (node3 d e f) (node3 g h i) (node3 j k l) m2
+addDigits4 :: Int -> FingerTree (Node (Node a)) -> Int -> Digit (Node a) -> Node a -> Node a -> Node a -> Node a -> Int -> Digit (Node a) -> Int -> FingerTree (Node (Node a)) -> FingerTree (Node (Node a))
+addDigits4 sm1 m1 sab (One a) b c d e sf (One f) sm2 m2 =
+    appendTree2 sm1 m1 (Node3 (sab + size c) a b c) (Node3 (size d + size e + sf) d e f) sm2 m2
+addDigits4 sm1 m1 sa (One a) b c d e sfg (Two f g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sa + size b + size c) a b c) (node2 d e) (Node2 sfg f g) sm2 m2
+addDigits4 sm1 m1 sa (One a) b c d e sfgh (Three f g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sa + size b + size c) a b c) (node3 d e f) (Node2 (sfgh - size f) g h) sm2 m2
+addDigits4 sm1 m1 sa (One a) b c d e sfghi (Four f g h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sa + size b + size c) a b c) (node3 d e f) (Node3 (sfghi - size f) g h i) sm2 m2
+addDigits4 sm1 m1 sab (Two a b) c d e f sg (One g) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node2 d e) (Node2 (size f + sg) f g) sm2 m2
+addDigits4 sm1 m1 sab (Two a b) c d e f sgh (Two g h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node3 d e f) (Node2 sgh g h) sm2 m2
+addDigits4 sm1 m1 sab (Two a b) c d e f sghi (Three g h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sab + size c) a b c) (node3 d e f) (Node3 sghi g h i) sm2 m2
+addDigits4 sm1 m1 sab (Two a b) c d e f sghij (Four g h i j) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 (sab + size c) a b c) (node3 d e f) (node2 g h) (Node2 (sghij - (size g + size h)) i j) sm2 m2
+addDigits4 sm1 m1 sabc (Three a b c) d e f g sh (One h) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node3 d e f) (Node2 (size g + sh) g h) sm2 m2
+addDigits4 sm1 m1 sabc (Three a b c) d e f g shi (Two h i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 sabc a b c) (node3 d e f) (Node3 (size g + shi) g h i) sm2 m2
+addDigits4 sm1 m1 sabc (Three a b c) d e f g shij (Three h i j) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 sabc a b c) (node3 d e f) (node2 g h) (Node2 (shij - size h) i j) sm2 m2
+addDigits4 sm1 m1 sabc (Three a b c) d e f g shijk (Four h i j k) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 sabc a b c) (node3 d e f) (node3 g h i) (Node2 (shijk - (size h + size i)) j k) sm2 m2
+addDigits4 sm1 m1 sabcd (Four a b c d) e f g h si (One i) sm2 m2 =
+    appendTree3 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (Node3 (size g + size h + si) g h i) sm2 m2
+addDigits4 sm1 m1 sabcd (Four a b c d) e f g h sij (Two i j) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (node2 g h) (Node2 sij i j) sm2 m2
+addDigits4 sm1 m1 sabcd (Four a b c d) e f g h sijk (Three i j k) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (node3 g h i) (Node2 (sijk - size i) j k) sm2 m2
+addDigits4 sm1 m1 sabcd (Four a b c d) e f g h sijkl (Four i j k l) sm2 m2 =
+    appendTree4 sm1 m1 (Node3 (sabcd - size d) a b c) (node3 d e f) (node3 g h i) (Node3 (sijkl - size i) j k l) sm2 m2
 
 -- | Builds a sequence from a seed value.  Takes time linear in the
 -- number of generated elements.  /WARNING:/ If the number of generated
@@ -976,12 +1010,13 @@ iterateN n f x
 
 -- | /O(1)/. Is this the empty sequence?
 null            :: Seq a -> Bool
-null (Seq Empty) = True
+null (Seq _ Empty) = True
 null _          =  False
 
 -- | /O(1)/. The number of elements in the sequence.
 length          :: Seq a -> Int
-length (Seq xs) =  size xs
+length (Seq n _) = n
+
 
 -- Views
 
@@ -1020,22 +1055,22 @@ instance Traversable ViewL where
 
 -- | /O(1)/. Analyse the left end of a sequence.
 viewl           ::  Seq a -> ViewL a
-viewl (Seq xs)  =  case viewLTree xs of
+viewl (Seq n xs)  =  case viewLTree xs of
     Nothing2 -> EmptyL
-    Just2 (Elem x) xs' -> x :< Seq xs'
+    Just2 (Elem x) xs' -> x :< Seq (n - 1) xs'
 
 {-# SPECIALIZE viewLTree :: FingerTree (Elem a) -> Maybe2 (Elem a) (FingerTree (Elem a)) #-}
 {-# SPECIALIZE viewLTree :: FingerTree (Node a) -> Maybe2 (Node a) (FingerTree (Node a)) #-}
 viewLTree       :: Sized a => FingerTree a -> Maybe2 a (FingerTree a)
 viewLTree Empty                 = Nothing2
 viewLTree (Single a)            = Just2 a Empty
-viewLTree (Deep s (One a) m sf) = Just2 a (pullL (s - size a) m sf)
-viewLTree (Deep s (Two a b) m sf) =
-    Just2 a (Deep (s - size a) (One b) m sf)
-viewLTree (Deep s (Three a b c) m sf) =
-    Just2 a (Deep (s - size a) (Two b c) m sf)
-viewLTree (Deep s (Four a b c d) m sf) =
-    Just2 a (Deep (s - size a) (Three b c d) m sf)
+viewLTree (Deep spr (One a) m ssf sf) = spr `seq` Just2 a (pullL m ssf sf)
+viewLTree (Deep spr (Two a b) m ssf sf) =
+    Just2 a (Deep (spr - size a) (One b) m ssf sf)
+viewLTree (Deep spr (Three a b c) m ssf sf) =
+    Just2 a (Deep (spr - size a) (Two b c) m ssf sf)
+viewLTree (Deep spr (Four a b c d) m ssf sf) =
+    Just2 a (Deep (spr - size a) (Three b c d) m ssf sf)
 
 -- | View of the right end of a sequence.
 data ViewR a
@@ -1082,22 +1117,23 @@ instance Traversable ViewR where
 
 -- | /O(1)/. Analyse the right end of a sequence.
 viewr           ::  Seq a -> ViewR a
-viewr (Seq xs)  =  case viewRTree xs of
+viewr (Seq n xs)  =  case viewRTree xs of
     Nothing2 -> EmptyR
-    Just2 xs' (Elem x) -> Seq xs' :> x
+    Just2 xs' (Elem x) -> Seq (n - 1) xs' :> x
 
 {-# SPECIALIZE viewRTree :: FingerTree (Elem a) -> Maybe2 (FingerTree (Elem a)) (Elem a) #-}
 {-# SPECIALIZE viewRTree :: FingerTree (Node a) -> Maybe2 (FingerTree (Node a)) (Node a) #-}
 viewRTree       :: Sized a => FingerTree a -> Maybe2 (FingerTree a) a
 viewRTree Empty                 = Nothing2
 viewRTree (Single z)            = Just2 Empty z
-viewRTree (Deep s pr m (One z)) = Just2 (pullR (s - size z) pr m) z
-viewRTree (Deep s pr m (Two y z)) =
-    Just2 (Deep (s - size z) pr m (One y)) z
-viewRTree (Deep s pr m (Three x y z)) =
-    Just2 (Deep (s - size z) pr m (Two x y)) z
-viewRTree (Deep s pr m (Four w x y z)) =
-    Just2 (Deep (s - size z) pr m (Three w x y)) z
+viewRTree (Deep spr pr m sz (One z)) = sz `seq` Just2 (pullR spr pr m) z
+viewRTree (Deep spr pr m syz (Two y z)) =
+    Just2 (Deep spr pr m (syz - size z) (One y)) z
+viewRTree (Deep spr pr m sxyz (Three x y z)) =
+    Just2 (Deep spr pr m (sxyz - size z) (Two x y)) z
+viewRTree (Deep spr pr m swxyz (Four w x y z)) =
+    Just2 (Deep spr pr m (swxyz - size z) (Three w x y)) z
+
 
 ------------------------------------------------------------------------
 -- Scans
@@ -1144,8 +1180,8 @@ scanr1 f xs = case viewr xs of
 -- integer less than the size of the sequence.
 -- If the position is out of range, 'index' fails with an error.
 index           :: Seq a -> Int -> a
-index (Seq xs) i
-  | 0 <= i && i < size xs = case lookupTree i xs of
+index (Seq n xs) i
+  | 0 <= i && i < n = case lookupTree i n xs of
                 Place _ (Elem x) -> x
   | otherwise   = error "index out of bounds"
 
@@ -1154,19 +1190,18 @@ data Place a = Place {-# UNPACK #-} !Int a
     deriving Show
 #endif
 
-{-# SPECIALIZE lookupTree :: Int -> FingerTree (Elem a) -> Place (Elem a) #-}
-{-# SPECIALIZE lookupTree :: Int -> FingerTree (Node a) -> Place (Node a) #-}
-lookupTree :: Sized a => Int -> FingerTree a -> Place a
-lookupTree _ Empty = error "lookupTree of empty tree"
-lookupTree i (Single x) = Place i x
-lookupTree i (Deep totalSize pr m sf)
+{-# SPECIALIZE lookupTree :: Int -> Int -> FingerTree (Elem a) -> Place (Elem a) #-}
+{-# SPECIALIZE lookupTree :: Int -> Int -> FingerTree (Node a) -> Place (Node a) #-}
+lookupTree :: Sized a => Int -> Int -> FingerTree a -> Place a
+lookupTree _ n Empty = n `seq` error "lookupTree of empty tree"
+lookupTree i n (Single x) = n `seq` Place i x
+lookupTree i n (Deep spr pr m ssf sf)
   | i < spr     =  lookupDigit i pr
-  | i < spm     =  case lookupTree (i - spr) m of
+  | i < spm     =  case lookupTree (i - spr) (n - (spr + ssf)) m of
                    Place i' xs -> lookupNode i' xs
   | otherwise   =  lookupDigit (i - spm) sf
   where
-    spr     = size pr
-    spm     = totalSize - size sf
+    spm     = n - ssf
 
 {-# SPECIALIZE lookupNode :: Int -> Node (Elem a) -> Place (Elem a) #-}
 {-# SPECIALIZE lookupNode :: Int -> Node (Node a) -> Place (Node a) #-}
@@ -1218,23 +1253,22 @@ update i x      = adjust (const x) i
 -- | /O(log(min(i,n-i)))/. Update the element at the specified position.
 -- If the position is out of range, the original sequence is returned.
 adjust          :: (a -> a) -> Int -> Seq a -> Seq a
-adjust f i (Seq xs)
-  | 0 <= i && i < size xs = Seq (adjustTree (const (fmap f)) i xs)
-  | otherwise   = Seq xs
+adjust f i (Seq n xs)
+  | 0 <= i && i < n = Seq n (adjustTree (const (fmap f)) i n xs)
+  | otherwise   = Seq n xs
 
-{-# SPECIALIZE adjustTree :: (Int -> Elem a -> Elem a) -> Int -> FingerTree (Elem a) -> FingerTree (Elem a) #-}
-{-# SPECIALIZE adjustTree :: (Int -> Node a -> Node a) -> Int -> FingerTree (Node a) -> FingerTree (Node a) #-}
+{-# SPECIALIZE adjustTree :: (Int -> Elem a -> Elem a) -> Int -> Int -> FingerTree (Elem a) -> FingerTree (Elem a) #-}
+{-# SPECIALIZE adjustTree :: (Int -> Node a -> Node a) -> Int -> Int -> FingerTree (Node a) -> FingerTree (Node a) #-}
 adjustTree      :: Sized a => (Int -> a -> a) ->
-            Int -> FingerTree a -> FingerTree a
-adjustTree _ _ Empty = error "adjustTree of empty tree"
-adjustTree f i (Single x) = Single (f i x)
-adjustTree f i (Deep s pr m sf)
-  | i < spr     = Deep s (adjustDigit f i pr) m sf
-  | i < spm     = Deep s pr (adjustTree (adjustNode f) (i - spr) m) sf
-  | otherwise   = Deep s pr m (adjustDigit f (i - spm) sf)
+            Int -> Int -> FingerTree a -> FingerTree a
+adjustTree _ i s Empty = s `seq` i `seq` error "adjustTree of empty tree"
+adjustTree f i s (Single x) = s `seq` Single (f i x)
+adjustTree f i s (Deep spr pr m ssf sf)
+  | i < spr     = Deep spr (adjustDigit f i pr) m ssf sf
+  | i < spm     = Deep spr pr (adjustTree (adjustNode f) (i - spr) (s - (spr + ssf)) m) ssf sf
+  | otherwise   = Deep spr pr m ssf (adjustDigit f (i - spm) sf)
   where
-    spr     = size pr
-    spm     = spr + size m
+    spm     = s - (spr + ssf)
 
 {-# SPECIALIZE adjustNode :: (Int -> Elem a -> Elem a) -> Int -> Node (Elem a) -> Node (Elem a) #-}
 {-# SPECIALIZE adjustNode :: (Int -> Node a -> Node a) -> Int -> Node (Node a) -> Node (Node a) #-}
@@ -1312,41 +1346,41 @@ take i          =  fst . splitAt i
 drop            :: Int -> Seq a -> Seq a
 drop i          =  snd . splitAt i
 
+
 -- | /O(log(min(i,n-i)))/. Split a sequence at a given position.
 -- @'splitAt' i s = ('take' i s, 'drop' i s)@.
-splitAt                 :: Int -> Seq a -> (Seq a, Seq a)
-splitAt i (Seq xs)      =  (Seq l, Seq r)
-  where (l, r)          =  split i xs
-
-split :: Int -> FingerTree (Elem a) ->
-    (FingerTree (Elem a), FingerTree (Elem a))
-split i Empty   = i `seq` (Empty, Empty)
-split i xs
-  | size xs > i = (l, consTree x r)
-  | otherwise   = (xs, Empty)
-  where Split l x r = splitTree i xs
+splitAt                   :: Int -> Seq a -> (Seq a, Seq a)
+splitAt i (Seq _ Empty)   = i `seq` (Seq 0 Empty, Seq 0 Empty)
+splitAt i whole@(Seq sxs xs)
+  | sxs > i = (Seq i l, Seq (sxs - i) (consTree x (sxs - i - 1) r))
+  | otherwise   = (whole, empty)
+  where TreeSplit _ l x _ r = splitTree i sxs xs
 
 data Split t a = Split t a t
 #if TESTING
     deriving Show
 #endif
 
-{-# SPECIALIZE splitTree :: Int -> FingerTree (Elem a) -> Split (FingerTree (Elem a)) (Elem a) #-}
-{-# SPECIALIZE splitTree :: Int -> FingerTree (Node a) -> Split (FingerTree (Node a)) (Node a) #-}
-splitTree :: Sized a => Int -> FingerTree a -> Split (FingerTree a) a
-splitTree _ Empty = error "splitTree of empty tree"
-splitTree i (Single x) = i `seq` Split Empty x Empty
-splitTree i (Deep _ pr m sf)
+data TreeSplit t a = TreeSplit Int t a Int t
+#if TESTING
+    deriving Show
+#endif
+
+{-# SPECIALIZE splitTree :: Int -> Int -> FingerTree (Elem a) -> TreeSplit (FingerTree (Elem a)) (Elem a) #-}
+{-# SPECIALIZE splitTree :: Int -> Int -> FingerTree (Node a) -> TreeSplit (FingerTree (Node a)) (Node a) #-}
+splitTree :: Sized a => Int -> Int -> FingerTree a -> TreeSplit (FingerTree a) a
+splitTree i st Empty = i `seq` st `seq` error "splitTree of empty tree"
+splitTree i st (Single x) = i `seq` st `seq` TreeSplit 0 Empty x 0 Empty
+splitTree i st (Deep spr pr m ssf sf)
   | i < spr     = case splitDigit i pr of
-            Split l x r -> Split (maybe Empty digitToTree l) x (deepL r m sf)
-  | i < spm     = case splitTree im m of
-            Split ml xs mr -> case splitNode (im - size ml) xs of
-                Split l x r -> Split (deepR pr ml l) x (deepL r mr sf)
+            Split l x r -> TreeSplit (maybe 0 size l) (maybe Empty digitToTree l) x (st - maybe 0 size l - size x) (deepL r m ssf sf)
+  | i < spm     = case splitTree im (st - (spr + ssf)) m of
+            TreeSplit sml ml xs smr mr -> case splitNode (im - sml) xs of
+                Split l x r -> TreeSplit (spr + sml + maybe 0 size l) (deepR spr pr ml l) x (maybe 0 size r + smr + ssf)  (deepL r mr ssf sf)
   | otherwise   = case splitDigit (i - spm) sf of
-            Split l x r -> Split (deepR pr m l) x (maybe Empty digitToTree r)
+            Split l x r -> TreeSplit (st - maybe 0 size r - size x) (deepR spr pr m l) x (maybe 0 size r) (maybe Empty digitToTree r)
   where
-    spr     = size pr
-    spm     = spr + size m
+    spm     = st - ssf
     im      = i - spr
 
 {-# SPECIALIZE splitNode :: Int -> Node (Elem a) -> Split (Maybe (Digit (Elem a))) (Elem a) #-}
@@ -1391,6 +1425,7 @@ splitDigit i (Four a b c d)
     sab     = sa + size b
     sabc    = sab + size c
 
+
 -- | /O(n)/.  Returns a sequence of all suffixes of this sequence,
 -- longest first.  For example,
 --
@@ -1399,7 +1434,7 @@ splitDigit i (Four a b c d)
 -- Evaluating the /i/th suffix takes /O(log(min(i, n-i)))/, but evaluating
 -- every suffix in the sequence takes /O(n)/ due to sharing.
 tails                   :: Seq a -> Seq (Seq a)
-tails (Seq xs)          = Seq (tailsTree (Elem . Seq) xs) |> empty
+tails (Seq n xs)          = Seq (n tailsTree (\ st t -> Elem (Seq st t)) n xs) |> empty
 
 -- | /O(n)/.  Returns a sequence of all prefixes of this sequence,
 -- shortest first.  For example,
@@ -1409,7 +1444,8 @@ tails (Seq xs)          = Seq (tailsTree (Elem . Seq) xs) |> empty
 -- Evaluating the /i/th prefix takes /O(log(min(i, n-i)))/, but evaluating
 -- every prefix in the sequence takes /O(n)/ due to sharing.
 inits                   :: Seq a -> Seq (Seq a)
-inits (Seq xs)          = empty <| Seq (initsTree (Elem . Seq) xs)
+inits (Seq n xs)          = empty <| Seq n (initsTree (\ st t -> Elem (Seq st t)) n xs)
+
 
 -- This implementation of tails (and, analogously, inits) has the
 -- following algorithmic advantages:
@@ -1469,35 +1505,37 @@ initsNode :: Node a -> Node (Digit a)
 initsNode (Node2 s a b) = Node2 s (One a) (Two a b)
 initsNode (Node3 s a b c) = Node3 s (One a) (Two a b) (Three a b c)
 
-{-# SPECIALIZE tailsTree :: (FingerTree (Elem a) -> Elem b) -> FingerTree (Elem a) -> FingerTree (Elem b) #-}
-{-# SPECIALIZE tailsTree :: (FingerTree (Node a) -> Node b) -> FingerTree (Node a) -> FingerTree (Node b) #-}
+{-# SPECIALIZE tailsTree :: (Int -> FingerTree (Elem a) -> Elem b) -> Int -> FingerTree (Elem a) -> FingerTree (Elem b) #-}
+{-# SPECIALIZE tailsTree :: (Int -> FingerTree (Node a) -> Node b) -> Int -> FingerTree (Node a) -> FingerTree (Node b) #-}
 -- | Given a function to apply to tails of a tree, applies that function
 -- to every tail of the specified tree.
-tailsTree :: (Sized a, Sized b) => (FingerTree a -> b) -> FingerTree a -> FingerTree b
-tailsTree _ Empty = Empty
-tailsTree f (Single x) = Single (f (Single x))
-tailsTree f (Deep n pr m sf) =
-    Deep n (fmap (\ pr' -> f (deep pr' m sf)) (tailsDigit pr))
-        (tailsTree f' m)
-        (fmap (f . digitToTree) (tailsDigit sf))
+tailsTree :: (Sized a, Sized b) => (Int -> FingerTree a -> b) -> Int -> FingerTree a -> FingerTree b
+tailsTree _ st Empty = st `seq` Empty
+tailsTree f st (Single x) = st `seq` Single (f (size x) (Single x))
+tailsTree f st (Deep spr pr m ssf sf) =
+    Deep spr (fmap (\ pr' -> f (st + size pr' - spr) (Deep (size pr') pr' m ssf sf)) (tailsDigit pr))
+        (tailsTree f' (st - (spr + ssf)) m)
+        ssf
+        (fmap (\ dig -> f (size dig) (digitToTree dig)) (tailsDigit sf))
   where
-    f' ms = let Just2 node m' = viewLTree ms in
-        fmap (\ pr' -> f (deep pr' m' sf)) (tailsNode node)
+    f' sms ms = let Just2 node m' = viewLTree ms in
+        fmap (\ pr' -> f (size pr' + sms - 1 + ssf) (Deep (size pr') pr' m' ssf sf)) (tailsNode node)
 
-{-# SPECIALIZE initsTree :: (FingerTree (Elem a) -> Elem b) -> FingerTree (Elem a) -> FingerTree (Elem b) #-}
-{-# SPECIALIZE initsTree :: (FingerTree (Node a) -> Node b) -> FingerTree (Node a) -> FingerTree (Node b) #-}
+{-# SPECIALIZE initsTree :: (Int -> FingerTree (Elem a) -> Elem b) -> Int -> FingerTree (Elem a) -> FingerTree (Elem b) #-}
+{-# SPECIALIZE initsTree :: (Int -> FingerTree (Node a) -> Node b) -> Int -> FingerTree (Node a) -> FingerTree (Node b) #-}
 -- | Given a function to apply to inits of a tree, applies that function
 -- to every init of the specified tree.
-initsTree :: (Sized a, Sized b) => (FingerTree a -> b) -> FingerTree a -> FingerTree b
-initsTree _ Empty = Empty
-initsTree f (Single x) = Single (f (Single x))
-initsTree f (Deep n pr m sf) =
-    Deep n (fmap (f . digitToTree) (initsDigit pr))
-        (initsTree f' m)
-        (fmap (f . deep pr m) (initsDigit sf))
+initsTree :: (Sized a, Sized b) => (Int -> FingerTree a -> b) -> Int -> FingerTree a -> FingerTree b
+initsTree _ st Empty = st `seq` Empty
+initsTree f st (Single x) = st `seq` Single (f (size x) (Single x))
+initsTree f st (Deep spr pr m ssf sf) =
+    Deep spr (fmap (\dig -> f (size dig) (digitToTree dig)) (initsDigit pr))
+        (initsTree f' (st - (spr + ssf)) m)
+        ssf
+        (fmap (\ sf' -> f (st + size sf' - ssf) (Deep spr pr m (size sf') sf')) (initsDigit sf))
   where
-    f' ms =  let Just2 m' node = viewRTree ms in
-             fmap (\ sf' -> f (deep pr m' sf')) (initsNode node)
+    f' sms ms = sms `seq` let Just2 m' node = viewRTree ms in
+             fmap (\ sf' -> f (size sf' + sms - 1 + spr) (Deep spr pr m' (size sf') sf')) (initsNode node)
 
 {-# INLINE foldlWithIndex #-}
 -- | 'foldlWithIndex' is a version of 'foldl' that also provides access
@@ -1661,14 +1699,15 @@ fromList        =  Data.List.foldl' (|>) empty
 
 -- | /O(n)/. The reverse of a sequence.
 reverse :: Seq a -> Seq a
-reverse (Seq xs) = Seq (reverseTree id xs)
+reverse (Seq n xs) = Seq n (reverseTree id xs)
 
 reverseTree :: (a -> a) -> FingerTree a -> FingerTree a
 reverseTree _ Empty = Empty
 reverseTree f (Single x) = Single (f x)
-reverseTree f (Deep s pr m sf) =
-    Deep s (reverseDigit f sf)
+reverseTree f (Deep spr pr m ssf sf) =
+    Deep ssf (reverseDigit f sf)
         (reverseTree (reverseNode f) m)
+        spr
         (reverseDigit f pr)
 
 {-# INLINE reverseDigit #-}
@@ -1804,8 +1843,8 @@ unstableSort = unstableSortBy compare
 -- frequently twice as fast as 'sortBy' -- when the sequence is already
 -- nearly sorted.
 unstableSortBy :: (a -> a -> Ordering) -> Seq a -> Seq a
-unstableSortBy cmp (Seq xs) =
-    fromList2 (size xs) $ maybe [] (unrollPQ cmp) $
+unstableSortBy cmp (Seq n xs) =
+    fromList2 n $ maybe [] (unrollPQ cmp) $
         toPQ cmp (\ (Elem x) -> PQueue x Nil) xs
 
 -- | fromList2, given a list and its length, constructs a completely
@@ -1870,7 +1909,7 @@ unrollPQ cmp = unrollPQ'
 toPQ :: (e -> e -> Ordering) -> (a -> PQueue e) -> FingerTree a -> Maybe (PQueue e)
 toPQ _ _ Empty = Nothing
 toPQ _ f (Single x) = Just (f x)
-toPQ cmp f (Deep _ pr m sf) = Just (maybe (pr' <> sf') ((pr' <> sf') <>) (toPQ cmp fNode m))
+toPQ cmp f (Deep _ pr m _ sf) = Just (maybe (pr' <> sf') ((pr' <> sf') <>) (toPQ cmp fNode m))
   where
     fDigit digit = case fmap f digit of
         One a           -> a
