@@ -260,52 +260,54 @@ instance Monad Seq where
 instance Applicative Seq where
     pure = singleton
 
+    {-# INLINABLE (<*>) #-}
     Seq Empty <*> xs = xs `seq` empty
     fs <*> Seq Empty = fs `seq` empty
     fs <*> Seq (Single (Elem x)) = fmap ($ x) fs
     fs <*> xs
       | length fs < 4 = foldl' add empty fs
       where add ys f = ys >< fmap f xs
-    fs <*> xs | length xs < 4 = apShort fs xs
-    fs <*> xs = apty fs xs
+    Seq fs <*> Seq (Deep _ (One (Elem a)) Empty (One (Elem b))) = Seq $ ap2FT id fs (a,b)
+    Seq fs <*> Seq (Deep _ (One (Elem a)) Empty (Two (Elem b) (Elem c))) =
+        Seq $ ap3FT id fs (a,b,c)
+    Seq fs <*> Seq (Deep _ (Two (Elem a) (Elem b)) Empty (One (Elem c))) =
+        Seq $ ap3FT id fs (a,b,c)
+    fs <*> xs = apty id fs xs
 
     xs *> ys = replicateSeq (length xs) ys
 
--- <*> when the length of the first argument is at least two and
--- the length of the second is two or three.
-apShort :: Seq (a -> b) -> Seq a -> Seq b
-apShort (Seq fs) xs = Seq $ case toList xs of
-            [a,b] -> ap2FT fs (a,b)
-            [a,b,c] -> ap3FT fs (a,b,c)
-            _ -> error "apShort: not 2-3"
-
-ap2FT :: FingerTree (Elem (a->b)) -> (a,a) -> FingerTree (Elem b)
-ap2FT fs (x,y) = Deep (size fs * 2)
-                      (Two (Elem $ firstf x) (Elem $ firstf y))
-                      (mapMulFT 2 (\(Elem f) -> Node2 2 (Elem (f x)) (Elem (f y))) m)
-                      (Two (Elem $ lastf x) (Elem $ lastf y))
+ap2FT :: (a -> b -> c) -> FingerTree (Elem a) -> (b,b) -> FingerTree (Elem c)
+ap2FT g xs (x,y) = Deep (size xs * 2)
+                        (Two (Elem $ firstf x) (Elem $ firstf y))
+                        (mapMulFT 2 (\(Elem a) -> let f = g a in Node2 2 (Elem (f x)) (Elem (f y))) m)
+                        (Two (Elem $ lastf x) (Elem $ lastf y))
   where
-    (Elem firstf, m, Elem lastf) = trimTree fs
+    firstf = g firstx
+    lastf = g lastx
+    (Elem firstx, m, Elem lastx) = trimTree xs
 
-ap3FT :: FingerTree (Elem (a->b)) -> (a,a,a) -> FingerTree (Elem b)
-ap3FT fs (x,y,z) = Deep (size fs * 3)
-                        (Three (Elem $ firstf x) (Elem $ firstf y) (Elem $ firstf z))
-                        (mapMulFT 3 (\(Elem f) -> Node3 3 (Elem (f x)) (Elem (f y)) (Elem (f z))) m)
-                        (Three (Elem $ lastf x) (Elem $ lastf y) (Elem $ lastf z))
+ap3FT :: (a -> b -> c) -> FingerTree (Elem a) -> (b,b,b) -> FingerTree (Elem c)
+ap3FT g xs (x,y,z) = Deep (size xs * 3)
+                          (Three (Elem $ firstf x) (Elem $ firstf y) (Elem $ firstf z))
+                          (mapMulFT 3 (\(Elem a) -> let f = g a in Node3 3 (Elem (f x)) (Elem (f y)) (Elem (f z))) m)
+                          (Three (Elem $ lastf x) (Elem $ lastf y) (Elem $ lastf z))
   where
-    (Elem firstf, m, Elem lastf) = trimTree fs
+    firstf = g firstx
+    lastf = g lastx
+    (Elem firstx, m, Elem lastx) = trimTree xs
 
--- <*> when the length of each argument is at least four.
-apty :: Seq (a -> b) -> Seq a -> Seq b
-apty (Seq fs) (Seq xs@Deep{}) = Seq $
-    Deep (s' * size fs)
-         (fmap (fmap firstf) pr')
-         (aptyMiddle (fmap firstf) (fmap lastf) fmap fs' xs')
-         (fmap (fmap lastf) sf')
+-- liftA2 when the length of each argument is at least four.
+{-# INLINE apty #-}
+apty :: (a -> b -> c) -> Seq a -> Seq b -> Seq c
+apty f (Seq xs) (Seq ys@Deep{}) = Seq $
+    Deep (s' * size xs)
+         (fmap (fmap (f firstx)) pr')
+         (aptyMiddle (fmap (f firstx)) (fmap (f lastx)) (fmap . f) xs' ys')
+         (fmap (fmap (f lastx)) sf')
   where
-    (Elem firstf, fs', Elem lastf) = trimTree fs
-    xs'@(Deep s' pr' _m' sf') = rigidify xs
-apty _ _ = error "apty: expects a Deep constructor"
+    (Elem firstx, xs', Elem lastx) = trimTree xs
+    ys'@(Deep s' pr' _m' sf') = rigidify ys
+apty _ _ _ = error "apty: expects a Deep constructor"
 
 -- | 'aptyMiddle' does most of the hard work of computing @fs<*>xs@.
 -- It produces the center part of a finger tree, with a prefix corresponding
@@ -319,8 +321,8 @@ aptyMiddle
   :: Sized c =>
      (c -> d)
      -> (c -> d)
-     -> ((a -> b) -> c -> d)
-     -> FingerTree (Elem (a -> b))
+     -> (a -> c -> d)
+     -> FingerTree (Elem a)
      -> FingerTree c
      -> FingerTree (Node d)
 -- Not at the bottom yet
@@ -364,8 +366,8 @@ aptyMiddle _ _ _ _ _ = error "aptyMiddle: expected Deep finger tree"
  aptyMiddle
   :: (Node c -> d)
      -> (Node c -> d)
-     -> ((a -> b) -> Node c -> d)
-     -> FingerTree (Elem (a -> b))
+     -> (a -> Node c -> d)
+     -> FingerTree (Elem a)
      -> FingerTree (Node c)
      -> FingerTree (Node d)
  #-}
@@ -373,8 +375,8 @@ aptyMiddle _ _ _ _ _ = error "aptyMiddle: expected Deep finger tree"
  aptyMiddle
   :: (Elem c -> d)
      -> (Elem c -> d)
-     -> ((a -> b) -> Elem c -> d)
-     -> FingerTree (Elem (a -> b))
+     -> (a -> Elem c -> d)
+     -> FingerTree (Elem a)
      -> FingerTree (Elem c)
      -> FingerTree (Node d)
  #-}
