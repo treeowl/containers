@@ -22,8 +22,8 @@ main = do
         , bench "lookup present" $ whnf (lookup evens) m_even
         , bench "at lookup absent" $ whnf (atLookup evens) m_odd
         , bench "at lookup present" $ whnf (atLookup evens) m_even
-        , bench "atLens lookup absent" $ whnf (atLensLookup evens) m_odd
-        , bench "atLens lookup present" $ whnf (atLensLookup evens) m_even
+        --, bench "atLens lookup absent" $ whnf (atLensLookup evens) m_odd
+        --, bench "atLens lookup present" $ whnf (atLensLookup evens) m_even
         , bench "insert absent" $ whnf (ins elems_even) m_odd
         , bench "insert present" $ whnf (ins elems_even) m_even
         , bench "at insert absent" $ whnf (atIns elems_even) m_odd
