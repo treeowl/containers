@@ -1963,33 +1963,57 @@ generalMergeA :: (Ord k, Applicative f)
               -> MergeTactic f k b c -- ^ What to do with entries in @ m2 @ but not @ m1 @
               -> (k -> a -> b -> f (Maybe c)) -- ^ What to do with entries in both maps
               -> Map k a -> Map k b -> f (Map k c)
-generalMergeA g1 g2 f = go
-  where
-    go Tip t2 = case g2 of
-                  Drop -> pure Tip
-                  Preserve -> pure t2
-                  MapFilter p -> pure $ mapMaybeWithKey p t2
-                  TraverseFilter p -> traverseMaybeWithKey p t2
-    go t1 Tip = case g1 of
-                  Drop -> pure Tip
-                  Preserve -> pure t1
-                  MapFilter p -> pure $ mapMaybeWithKey p t1
-                  TraverseFilter p -> traverseMaybeWithKey p t1
-    go (Bin _ kx x l1 r1) t2 =
-      case found of
-        Nothing -> case g1 of
-              Drop -> merge <$> l' <*> r'
-              Preserve -> link kx x <$> l' <*> r'
-              MapFilter p -> case p kx x of
-                               Nothing -> merge <$> l' <*> r'
-                               Just x' -> link kx x' <$> l' <*> r'
-              TraverseFilter p -> (\ !lt mx !rt -> maybe merge (link kx) mx lt rt)
-                                   <$> l' <*> p kx x <*> r'
-        Just x2 -> (\lt mx rt -> maybe merge (link kx) mx lt rt) <$> l' <*> f kx x x2 <*> r'
-      where
+generalMergeA g1 g2 f =
+    start1 g1 (start2 g2) f
+    where
+    start2 Drop               = \_  -> pure Tip
+    start2 Preserve           = \t2 -> pure t2
+    start2 (MapFilter p)      = \t2 -> pure $ mapMaybeWithKey p t2
+    start2 (TraverseFilter p) = \t2 -> traverseMaybeWithKey p t2
+
+    {-# INLINE withLookup #-}
+    withLookup kx x l1 r1 t2 c =
+        case found of
+        Nothing -> c l' r'
+        Just x2 ->
+            (\lt mx rt -> maybe merge (link kx) mx lt rt)
+                <$> l' <*> f kx x x2 <*> r'
+        where
         (l2, found, r2) = splitLookup kx t2
         l' = go l1 l2
         r' = go r1 r2
+    
+    start1 Drop !g2' f = go
+        where
+        go Tip t2 = g2' t2
+        go t1 Tip = pure Tip
+        go (Bin _ kx x l1 r1) t2 =
+            withLookup kx x l1 r1 t2 $ \l' r' ->
+                merge <$> l' <*> r'
+    start1 Preserve g2' f = go
+        where
+        go Tip t2 = g2' t2
+        go t1 Tip = pure t1
+        go (Bin _ kx x l1 r1) t2 =
+            withLookup kx x l1 r1 t2 $ \l' r' ->
+                link kx x <$> l' <*> r'
+    start1 (MapFilter p) g2' f = go
+        where
+        go Tip t2 = g2' t2
+        go t1 Tip = pure $ mapMaybeWithKey p t1
+        go (Bin _ kx x l1 r1) t2 =
+            withLookup kx x l1 r1 t2 $ \l' r' ->
+                case p kx x of
+                Nothing -> merge <$> l' <*> r'
+                Just x' -> link kx x' <$> l' <*> r'
+    start1 (TraverseFilter p) g2' f = go
+        where
+        go Tip t2 = g2' t2
+        go t1 Tip = traverseMaybeWithKey p t1
+        go (Bin _ kx x l1 r1) t2 =
+            withLookup kx x l1 r1 t2 $ \l' r' ->
+                (\ !lt mx !rt -> maybe merge (link kx) mx lt rt)
+                    <$> l' <*> p kx x <*> r'
 {-# INLINE generalMergeA #-}
 #endif
 
