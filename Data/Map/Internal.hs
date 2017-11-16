@@ -10,6 +10,7 @@
 #if __GLASGOW_HASKELL__ >= 708
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 #define USE_MAGIC_PROXY 1
 #endif
 
@@ -129,6 +130,7 @@
 module Data.Map.Internal (
     -- * Map type
       Map(..)          -- instance Eq,Show,Read
+    , liftCoercions
 
     -- * Operators
     , (!), (!?), (\\)
@@ -404,6 +406,7 @@ import qualified Control.Category as Category
 #endif
 #if __GLASGOW_HASKELL__ >= 708
 import Data.Coerce
+import Data.Type.Coercion
 #endif
 
 
@@ -3025,6 +3028,14 @@ mapKeysWith :: Ord k2 => (a -> a -> a) -> (k1->k2) -> Map k1 a -> Map k2 a
 mapKeysWith c f = fromListWith c . foldrWithKey (\k x xs -> (f k, x) : xs) []
 #if __GLASGOW_HASKELL__
 {-# INLINABLE mapKeysWith #-}
+#endif
+
+#if __GLASGOW_HASKELL__ >= 708
+liftKeyCoercion :: forall k1 k2 a. Coercion k1 k2 -> Coercion (Map k1 a) (Map k2 a)
+liftKeyCoercion Coercion = unsafeCoerce (Coercion :: Coercion (Map k1 a) (Map k1 a))
+
+liftCoercions :: forall k1 k2 v1 v2. Coercion k1 k2 -> Coercion v1 v2 -> Coercion (Map k1 v1) (Map k2 v2)
+liftCoercions c Coercion = case liftKeyCoercion c :: Coercion (Map k1 v1) (Map k2 v1) of Coercion -> Coercion
 #endif
 
 

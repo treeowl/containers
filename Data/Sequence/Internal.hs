@@ -1157,6 +1157,7 @@ execState m x = snd (runState m x)
 -- is a generalization of many Data.Sequence methods.
 {-# SPECIALIZE applicativeTree :: Int -> Int -> State s a -> State s (FingerTree a) #-}
 {-# SPECIALIZE applicativeTree :: Int -> Int -> Identity a -> Identity (FingerTree a) #-}
+{-# INLINABLE applicativeTree #-}
 -- Special note: the Identity specialization automatically does node sharing,
 -- reducing memory usage of the resulting tree to /O(log n)/.
 applicativeTree :: Applicative f => Int -> Int -> f a -> f (FingerTree a)
@@ -1208,6 +1209,8 @@ replicateA n x
   | n >= 0      = Seq <$> applicativeTree n 1 (Elem <$> x)
   | otherwise   = error "replicateA takes a nonnegative integer argument"
 {-# SPECIALIZE replicateA :: Int -> State a b -> State a (Seq b) #-}
+{-# SPECIALIZE replicateA :: Int -> Identity a -> Identity (Seq a) #-}
+{-# INLINABLE replicateA #-}
 
 -- | 'replicateM' is a sequence counterpart of 'Control.Monad.replicateM'.
 --
