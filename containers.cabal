@@ -88,6 +88,9 @@ Library
         Utils.Containers.Internal.Coercions
         Data.Map.Internal.DeprecatedShowTree
         Data.IntMap.Internal.DeprecatedDebug
+    if impl (ghc >= 7.2)
+      other-modules:
+        Utils.Containers.Internal.UnboxedMaybe
 
     include-dirs: include
 

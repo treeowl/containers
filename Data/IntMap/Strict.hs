@@ -7,6 +7,9 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedSums #-}
 {-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TypeInType #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 #endif
 
 #include "containers.h"
@@ -221,7 +224,7 @@ module Data.IntMap.Strict (
     , showTreeWith
     ) where
 
-import Prelude hiding (lookup,map,filter,foldr,foldl,null)
+import Prelude hiding (lookup,map,filter,foldr,foldl,null, ($!))
 
 import Data.Bits
 import qualified Data.IntMap.Internal as L
@@ -310,6 +313,8 @@ import qualified Data.IntSet.Internal as IntSet
 import Utils.Containers.Internal.BitUtil
 #if __GLASGOW_HASKELL__ >= 802
 import Utils.Containers.Internal.PtrEquality (ptrEq)
+import Utils.Containers.Internal.UnboxedMaybe (Maybe#, pattern Nothing#, pattern Just#, toMaybe)
+import GHC.Exts (TYPE)
 #endif
 import Utils.Containers.Internal.StrictFold
 import Utils.Containers.Internal.StrictPair
@@ -335,6 +340,19 @@ import Control.Applicative (Applicative (..), liftA2)
 --
 -- > map (\ v -> undefined) m  ==  undefined      -- m is not empty
 -- > mapKeys (\ k -> undefined) m  ==  undefined  -- m is not empty
+
+#if __GLASGOW_HASKELL__ >= 802
+-- Annoyingly, Prelude.$! is not (yet) polykinded. So we just define
+-- our own.
+infixr 0 $!
+($!) :: forall r a (b :: TYPE r).
+        (a -> b) -> a -> b
+f $! (!x) = f x
+#endif
+#else
+($!) :: (a -> b) -> a -> b
+f $! (!x) = f x
+#endif
 
 {--------------------------------------------------------------------
   Query
@@ -569,9 +587,11 @@ updateLookupWithKey f0 !k0 t0 = toPair $ go f0 k0 t0
 -- In short : @'lookup' k ('alter' f k m) = f ('lookup' k m)@.
 #if __GLASGOW_HASKELL__ >= 802
 alter :: (Maybe a -> Maybe a) -> Key -> IntMap a -> IntMap a
-alter f !k t = case alter# f k t of
-  (# (# #) | #) -> t
-  (# | t' #) -> t'
+alter f !k t = case alter# (\m -> case f (toMaybe m) of
+                              Nothing -> Nothing#
+                              Just x -> Just# x) k t of
+  Nothing# -> t
+  Just# t' -> t'
 {-# INLINE alter #-}
 
 
@@ -580,31 +600,31 @@ alter f !k t = case alter# f k t of
 --
 -- If no modifications are made to the map (# (# #) | #) is returned, otherwise
 -- (# | newMap #) is returned.
-alter# :: (Maybe a -> Maybe a) -> Key -> IntMap a -> (# (# #) | IntMap a #)
+alter# :: (Maybe# a -> Maybe# a) -> Key -> IntMap a -> Maybe# (IntMap a)
 alter# f !k t@(Bin p m l r)
-  | nomatch k p m = case f Nothing of
-                      Nothing -> (# (# #) | #)
-                      Just !x -> (# | link k (Tip k x) p t #)
+  | nomatch k p m = case f Nothing# of
+                      Nothing# -> Nothing#
+                      Just# !x -> Just# $! link k (Tip k x) p t
   | zero k m = case alter# f k l of
-      (# (# #) | #) -> (# (# #) | #)
-      (# | l' #) -> (# | binCheckLeft p m l' r #)
+      Nothing# -> Nothing#
+      Just# l' -> Just# $! binCheckLeft p m l' r
 
   | otherwise = case alter# f k r of
-      (# (# #) | #) -> (# (# #) | #)
-      (# | r' #) -> (# | binCheckRight p m l r' #)
+      Nothing# -> Nothing#
+      Just# r' -> Just# $! binCheckRight p m l r'
 
 alter# f k t@(Tip ky y)
-  | k==ky         = case f (Just y) of
-                      Just x -> if x `ptrEq` y
-                                then (# (# #) | #)
-                                else (# | Tip ky x #)
-                      Nothing -> (# | Nil #)
-  | otherwise     = case f Nothing of
-                      Just !x -> (# | link k (Tip k x) ky t #)
-                      Nothing -> (# (# #) | #)
-alter# f k Nil     = case f Nothing of
-                      Just !x -> (# | Tip k x #)
-                      Nothing -> (# (# #) | #)
+  | k==ky         = case f (Just# y) of
+                      Just# !x -> if x `ptrEq` y
+                                  then Nothing#
+                                  else Just# (Tip ky x)
+                      Nothing# -> Just# Nil
+  | otherwise     = case f Nothing# of
+                      Just# !x -> Just# $! link k (Tip k x) ky t
+                      Nothing# -> Nothing#
+alter# f k Nil     = case f Nothing# of
+                      Just# !x -> Just# (Tip k x)
+                      Nothing# -> Nothing#
 
 #else
 alter :: (Maybe a -> Maybe a) -> Key -> IntMap a -> IntMap a
